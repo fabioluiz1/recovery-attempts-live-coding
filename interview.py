@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
+import bisect
 import random
 
 class AttemptResult(Enum):
@@ -82,31 +83,47 @@ def build_recovery_episodes(
     """
     random.shuffle(attempts)
 
-    recovery_episodes = []
-    recoveries_per_subscription = {}
+    sorted_attempts_by_subscription_id = {}
+
     for a in attempts:
         if a.occurred_at <= as_of:
-            if a.subscription_id not in recoveries_per_subscription:
-                episode = RecoveryEpisode(
-                    subscription_id=a.subscription_id,
-                    started_at=a.occurred_at,
-                    deadline=a.occurred_at + recovery_window_length,
-                    ended_at=None,
-                    status=EpisodeStatus.OPEN,
-                    failure_attempt_ids=(),
-                    recovery_attempt_id=None
-                )
-                recovery_episodes.append(episode)
-                recoveries_per_subscription[a.subscription_id] = episode
+            if a.subscription_id not in sorted_attempts_by_subscription_id:
+                sorted_attempts_by_subscription_id[a.subscription_id] = []
             
-            
-            
-    print("*********************")
-    print(len(recovery_episodes))
-    print(recovery_episodes)
-    print("---------------------")
+            subscription_attempts = sorted_attempts_by_subscription_id[a.subscription_id]
 
-    return recovery_episodes
+            bisect.insort(subscription_attempts, a, key=lambda c: c.occurred_at)
+
+            # if a.subscription_id not in recoveries_per_subscription:
+            #     episode = RecoveryEpisode(
+            #         subscription_id=a.subscription_id,
+            #         started_at=a.occurred_at,
+            #         deadline=a.occurred_at + recovery_window_length,
+            #         ended_at=None,
+            #         status=EpisodeStatus.OPEN,
+            #         failure_attempt_ids=(),
+            #         recovery_attempt_id=None
+            #     )
+            #     recovery_episodes.append(episode)
+            #     recoveries_per_subscription[a.subscription_id] = episode
+
+    print("AS OF", as_of)
+    for subscription_id, subscription_attempts in sorted_attempts_by_subscription_id.items():
+        for a in subscription_attempts:
+            print(subscription_id, a.occurred_at, a.result)
+    print("************")
+
+    # recovery_episodes = []
+    # recoveries_per_subscription = {}
+
+            
+            
+    # print("*********************")
+    # print(len(recovery_episodes))
+    # print(recovery_episodes)
+    # print("---------------------")
+
+    # return recovery_episodes
 
 
 def run_examples() -> None:
