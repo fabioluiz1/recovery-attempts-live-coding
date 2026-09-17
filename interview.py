@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
+import random
 
 class AttemptResult(Enum):
     FAILURE = "failure"
@@ -79,6 +80,8 @@ def build_recovery_episodes(
 
     4. A SUCCESS during the recovery window recovers an open episode.
     """
+    random.shuffle(attempts)
+
     # 2 Filter by as_of - discard after as_of
     recovery_episodes = [
         RecoveryEpisode(
