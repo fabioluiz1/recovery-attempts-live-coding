@@ -83,17 +83,61 @@ def build_recovery_episodes(
 
 
 def run_examples() -> None:
-    recovery = RecoveryEpisode(
-        subscription_id="2",
-        started_at=0,
-        deadline=15 * 86400,         # 15 days
-        ended_at=None,
-        status=EpisodeStatus.OPEN,   # also RECOVERY or EXPIRED
-        failure_attempt_ids=('1',),
-        recovery_attempt_id=None
-    )
+    attempts = [
+        Attempt(
+            attempt_id='1',
+            subscription_id='1',
+            occurred_at=0,
+            result=AttemptResult.FAILURE,
+        ),
+        Attempt(
+            subscription_id='2',
+            attempt_id='2',
+            occurred_at=0,
+            result=AttemptResult.FAILURE,
+        ),
+        Attempt(
+            subscription_id='3',
+            attempt_id='3',
+            occurred_at=0,
+            result=AttemptResult.SUCCESS,
+        ),
+        Attempt(
+            subscription_id='1',
+            attempt_id='4',
+            occurred_at=2 * 86400,
+            result=AttemptResult.FAILURE,
+        ),
+        Attempt(
+            subscription_id='1',
+            attempt_id='5',
+            occurred_at=5 * 86400,
+            result=AttemptResult.SUCCESS,
+        ),
+        Attempt(
+            subscription_id='2',
+            attempt_id='6',
+            occurred_at=5 * 86400,
+            result=AttemptResult.SUCCESS,
+        ),
+    ]
 
-    print(recovery)
+    # 1 Naive map
+    # 1 Attempt -> 1 Episode (empty logic)
+
+    recovery_episodes = [
+        RecoveryEpisode(
+            subscription_id=a.subscription_id,
+            started_at=a.occurred_at,
+            deadline=15 * 86400,         # 15 days
+            ended_at=None,
+            status=EpisodeStatus.OPEN,   # also RECOVERY or EXPIRED
+            failure_attempt_ids=(),
+            recovery_attempt_id=None
+        ) for a in attempts
+    ]
+
+    print(recovery_episodes)
 
 
 if __name__ == "__main__":
