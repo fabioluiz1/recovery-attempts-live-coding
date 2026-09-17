@@ -82,23 +82,31 @@ def build_recovery_episodes(
     """
     random.shuffle(attempts)
 
-    # 2 Filter by as_of - discard after as_of
-    recovery_episodes = [
-        RecoveryEpisode(
-            subscription_id=a.subscription_id,
-            started_at=a.occurred_at,
-            deadline=15 * 86400,         # 15 days
-            ended_at=None,
-            status=EpisodeStatus.OPEN,   # also RECOVERY or EXPIRED
-            failure_attempt_ids=(),
-            recovery_attempt_id=None
-        ) for a in attempts if a.occurred_at <= as_of
-    ]
-
+    recovery_episodes = []
+    recoveries_per_subscription = {}
+    for a in attempts:
+        if a.occurred_at <= as_of:
+            if a.subscription_id not in recoveries_per_subscription:
+                episode = RecoveryEpisode(
+                    subscription_id=a.subscription_id,
+                    started_at=a.occurred_at,
+                    deadline=a.occurred_at + recovery_window_length,
+                    ended_at=None,
+                    status=EpisodeStatus.OPEN,
+                    failure_attempt_ids=(),
+                    recovery_attempt_id=None
+                )
+                recovery_episodes.append(episode)
+                recoveries_per_subscription[a.subscription_id] = episode
+            
+            
+            
     print("*********************")
     print(len(recovery_episodes))
     print(recovery_episodes)
     print("---------------------")
+
+    return recovery_episodes
 
 
 def run_examples() -> None:
@@ -112,13 +120,13 @@ def run_examples() -> None:
         Attempt(
             subscription_id='2',
             attempt_id='2',
-            occurred_at=0,
+            occurred_at=0.5 * 86400,
             result=AttemptResult.FAILURE,
         ),
         Attempt(
             subscription_id='3',
             attempt_id='3',
-            occurred_at=0,
+            occurred_at=1.5 * 86400,
             result=AttemptResult.SUCCESS,
         ),
         Attempt(
@@ -150,7 +158,7 @@ def run_examples() -> None:
     build_recovery_episodes(
         attempts=attempts,
         recovery_window_length=20 * 86400,
-        as_of=2 * 86400,
+        as_of=1 * 86400,
     )
 
     build_recovery_episodes(
