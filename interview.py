@@ -83,7 +83,18 @@ def build_recovery_episodes(
 
 
 def run_examples() -> None:
-  raise NotImplementedError
+    recovery = RecoveryEpisode(
+        subscription_id="2",
+        started_at=0,
+        deadline=15 * 86400,         # 15 days
+        ended_at=None,
+        status=EpisodeStatus.OPEN,   # also RECOVERY or EXPIRED
+        failure_attempt_ids=('1',),
+        recovery_attempt_id=None
+    )
+
+    print(recovery)
+
 
 if __name__ == "__main__":
     run_examples()
