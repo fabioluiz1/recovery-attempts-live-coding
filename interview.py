@@ -79,7 +79,23 @@ def build_recovery_episodes(
 
     4. A SUCCESS during the recovery window recovers an open episode.
     """
-    raise NotImplementedError
+    # 2 Filter by as_of - discard after as_of
+    recovery_episodes = [
+        RecoveryEpisode(
+            subscription_id=a.subscription_id,
+            started_at=a.occurred_at,
+            deadline=15 * 86400,         # 15 days
+            ended_at=None,
+            status=EpisodeStatus.OPEN,   # also RECOVERY or EXPIRED
+            failure_attempt_ids=(),
+            recovery_attempt_id=None
+        ) for a in attempts if a.occurred_at <= as_of
+    ]
+
+    print("*********************")
+    print(len(recovery_episodes))
+    print(recovery_episodes)
+    print("---------------------")
 
 
 def run_examples() -> None:
@@ -122,22 +138,23 @@ def run_examples() -> None:
         ),
     ]
 
-    # 1 Naive map
-    # 1 Attempt -> 1 Episode (empty logic)
+    build_recovery_episodes(
+        attempts=attempts,
+        recovery_window_length=20 * 86400,
+        as_of=0,
+    )
 
-    recovery_episodes = [
-        RecoveryEpisode(
-            subscription_id=a.subscription_id,
-            started_at=a.occurred_at,
-            deadline=15 * 86400,         # 15 days
-            ended_at=None,
-            status=EpisodeStatus.OPEN,   # also RECOVERY or EXPIRED
-            failure_attempt_ids=(),
-            recovery_attempt_id=None
-        ) for a in attempts
-    ]
+    build_recovery_episodes(
+        attempts=attempts,
+        recovery_window_length=20 * 86400,
+        as_of=2 * 86400,
+    )
 
-    print(recovery_episodes)
+    build_recovery_episodes(
+        attempts=attempts,
+        recovery_window_length=20 * 86400,
+        as_of=5 * 86400,
+    )
 
 
 if __name__ == "__main__":
