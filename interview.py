@@ -94,36 +94,49 @@ def build_recovery_episodes(
 
             bisect.insort(subscription_attempts, a, key=lambda c: c.occurred_at)
 
-            # if a.subscription_id not in recoveries_per_subscription:
-            #     episode = RecoveryEpisode(
-            #         subscription_id=a.subscription_id,
-            #         started_at=a.occurred_at,
-            #         deadline=a.occurred_at + recovery_window_length,
-            #         ended_at=None,
-            #         status=EpisodeStatus.OPEN,
-            #         failure_attempt_ids=(),
-            #         recovery_attempt_id=None
-            #     )
-            #     recovery_episodes.append(episode)
-            #     recoveries_per_subscription[a.subscription_id] = episode
 
-    print("AS OF", as_of)
+    recovery_episodes = []
     for subscription_id, subscription_attempts in sorted_attempts_by_subscription_id.items():
+        current_episode = None
+
         for a in subscription_attempts:
-            print(subscription_id, a.occurred_at, a.result)
-    print("************")
+            if (current_episode == None):
+                current_episode = {
+                    "subscription_id": a.subscription_id,
+                    "started_at": a.occurred_at,
+                    "deadline": a.occurred_at + recovery_window_length,
+                    "ended_at": None,
+                    "status": EpisodeStatus.OPEN,
+                    "failure_attempt_ids": [],
+                    "recovery_attempt_id": None
+                }
+                recovery_episodes.append(current_episode)
 
-    # recovery_episodes = []
-    # recoveries_per_subscription = {}
+            if a.result == AttemptResult.FAILURE:
+                current_episode["failure_attempt_ids"].append(a.attempt_id)
 
-            
-            
-    # print("*********************")
-    # print(len(recovery_episodes))
-    # print(recovery_episodes)
-    # print("---------------------")
+                if current_episode["deadline"] < as_of:
+                    current_episode["status"] = EpisodeStatus.EXPIRED
+                    current_episode["ended_at"] = a.occurred_at
+            else:
+                current_episode["recovery_attempt_id"] = a.attempt_id
+                current_episode["status"] = EpisodeStatus.RECOVERED
+                current_episode["ended_at"] = a.occurred_at
+                current_episode = None
 
-    # return recovery_episodes
+    frozen_recovery_episodes = []
+    for e in recovery_episodes:
+        bisect.insort(frozen_recovery_episodes, RecoveryEpisode(**e), key=lambda c: c.subscription_id)
+
+    print("*********************")
+    print("AS OF", as_of)
+    # print(len(frozen_recovery_episodes))
+    # print(frozen_recovery_episodes)
+
+    for e in frozen_recovery_episodes:
+        print(e.subscription_id, e.status, e.failure_attempt_ids, e.recovery_attempt_id)
+
+    return frozen_recovery_episodes
 
 
 def run_examples() -> None:
@@ -144,44 +157,50 @@ def run_examples() -> None:
             subscription_id='3',
             attempt_id='3',
             occurred_at=1.5 * 86400,
-            result=AttemptResult.SUCCESS,
+            result=AttemptResult.FAILURE,
         ),
         Attempt(
             subscription_id='1',
             attempt_id='4',
-            occurred_at=2 * 86400,
+            occurred_at=1 * 86400,
             result=AttemptResult.FAILURE,
         ),
         Attempt(
             subscription_id='1',
             attempt_id='5',
-            occurred_at=5 * 86400,
+            occurred_at=2 * 86400,
             result=AttemptResult.SUCCESS,
         ),
         Attempt(
             subscription_id='2',
             attempt_id='6',
-            occurred_at=5 * 86400,
-            result=AttemptResult.SUCCESS,
+            occurred_at=3 * 86400,
+            result=AttemptResult.FAILURE,
         ),
     ]
 
     build_recovery_episodes(
         attempts=attempts,
-        recovery_window_length=20 * 86400,
+        recovery_window_length=2 * 86400,
         as_of=0,
     )
 
     build_recovery_episodes(
         attempts=attempts,
-        recovery_window_length=20 * 86400,
+        recovery_window_length=2 * 86400,
         as_of=1 * 86400,
     )
 
     build_recovery_episodes(
         attempts=attempts,
-        recovery_window_length=20 * 86400,
-        as_of=5 * 86400,
+        recovery_window_length=2 * 86400,
+        as_of=2 * 86400,
+    )
+
+    build_recovery_episodes(
+        attempts=attempts,
+        recovery_window_length=2 * 86400,
+        as_of=3 * 86400,
     )
 
 
