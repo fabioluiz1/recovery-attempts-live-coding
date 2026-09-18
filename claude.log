@@ -1,0 +1,524 @@
+# Claude Code session log
+# Project: /Users/fabio/code/recovery-episodes
+# Date: 2026-09-17
+# Format: Q = question asked, A = answer given
+
+
+================================================================================
+Q1. @dataclass(frozen=True) class Attempt with "attempt_id=str" etc.
+    What is the error in Attempt(attempt_id='1', subscription_id='1',
+    occurred_at=0, result=AttemptResult.FAILURE)?
+================================================================================
+A1. TypeError: Attempt.__init__() got an unexpected keyword argument 'attempt_id'
+
+    Cause: the class body uses "=" where @dataclass requires ":".
+      - attempt_id = str creates a class attribute holding the str type object.
+      - @dataclass builds fields from __annotations__, so
+        dataclasses.fields(Attempt) returns ().
+      - With zero fields the generated __init__ accepts only self.
+
+    Fix:
+        @dataclass(frozen=True)
+        class Attempt:
+            attempt_id: str
+            subscription_id: str
+            occurred_at: int
+            result: AttemptResult
+
+
+================================================================================
+Q2. But this works! (RecoveryEpisode declared the same way with "=")
+================================================================================
+A2. RecoveryEpisode has zero fields too. The constructor call at
+    interview.py:131 never executed:
+      - attempts was an empty list (every element commented out).
+      - The comprehension [RecoveryEpisode(...) for a in attempts] never
+        evaluates its body with zero items.
+      - Python compiles the call but never runs it, so print showed [].
+
+    Verified: dataclasses.fields(RecoveryEpisode) -> ()
+              direct call -> TypeError: unexpected keyword argument
+              RecoveryEpisode() with no args -> works, prints RecoveryEpisode()
+
+    Same "=" slip in the function signature:
+        def build_recovery_episodes(*, attempts=list[Attempt], ...)
+    Those are DEFAULT VALUES, not annotations, so omitting an argument
+    silently passes a type object instead of data.
+
+
+================================================================================
+Q3. This works! (the RecoveryEpisode(...) for a in attempts snippet)
+================================================================================
+A3. It is the comprehension body, which does not run. Running the file as-is:
+
+        TypeError: Attempt.__init__() got an unexpected keyword argument
+        'attempt_id'   (raised at line 86, before the comprehension)
+
+    With attempts empty the comprehension prints [].
+    With one attempt uncommented it raises the same TypeError.
+
+
+================================================================================
+Q4. Stash current changes, initial commit worked
+================================================================================
+A4. git stash push -m "wip: interview.py experiments"
+      - stash@{0} holds the "=" version.
+      - Tree returned to d1af2da, which already used ":" annotations, so
+        python3 interview.py runs clean.
+      - interview-notes.txt stayed put: untracked files are not stashed by default.
+      - Removed the __pycache__/ directory created by test runs.
+      - Restore with: git stash pop
+
+    Noted: failure_attempt_ids=('1') is the string '1', not a tuple.
+    A one-element tuple needs the trailing comma: ('1',)
+
+
+================================================================================
+Q5. Is this syntax correct?
+    RecoveryEpisode(...) if a.occurred_at > as_of for a in attempts
+================================================================================
+A5. No. SyntaxError: expected 'else' after 'if' expression.
+
+    Two different "if"s exist in a comprehension:
+      - Filter clause, drops items, goes AFTER for:
+            [expr for a in attempts if cond]
+      - Conditional expression, picks between two values, requires else:
+            [x if cond else y for a in attempts]
+
+    Correct form:
+        [
+            RecoveryEpisode(...)
+            for a in attempts
+            if a.occurred_at > as_of
+        ]
+
+    Content notes:
+      - a.occurred_at > as_of keeps attempts AFTER the snapshot. A snapshot
+        "as of" a moment usually keeps a.occurred_at <= as_of.
+      - deadline=15 * 86400 is a constant; per the docstring it should be
+        a.occurred_at + recovery_window_length.
+
+
+================================================================================
+Q6. Method to shuffle the order in a list
+================================================================================
+A6. import random
+    random.shuffle(attempts)                      # in place, returns None
+    shuffled = random.sample(attempts, len(attempts))  # new list
+
+    Never write lst = random.shuffle(lst): it sets lst to None.
+    Reproducible: random.seed(42) or random.Random(42).shuffle(attempts)
+
+
+================================================================================
+Q7. How do I init a dict?
+================================================================================
+A7. d = {}                                   # empty
+    d = {"1": [], "2": []}                   # literal
+    d = dict(a=1, b=2)                       # keyword form, string keys only
+    d = dict.fromkeys(ids, 0)                # same initial value for many keys
+    d = {a.subscription_id: a for a in attempts}   # comprehension
+
+    Grouping:
+        from collections import defaultdict
+        by_subscription = defaultdict(list)
+        for a in attempts:
+            by_subscription[a.subscription_id].append(a)
+
+    Trap: dict.fromkeys(ids, []) shares ONE list across all keys.
+    Use it only for immutable defaults like 0 or None.
+
+
+================================================================================
+Q8. Como checo se some_dict[key] is None?
+================================================================================
+A8. key not in some_dict            # a chave nao existe
+    some_dict.get(key) is None      # nao existe OU o valor e None
+    some_dict[key] is None          # so o valor; KeyError se a chave faltar
+
+    Para separar os dois casos:
+        MISSING = object()
+        value = some_dict.get(key, MISSING)
+        if value is MISSING: ...    # chave ausente
+        elif value is None: ...     # chave existe, valor None
+
+    Sempre "is None", nunca "== None".
+    "if not some_dict.get(key)" tambem dispara para 0, "", [] e False.
+
+
+================================================================================
+Q9. How do I push or append an element to a list?
+================================================================================
+A9. xs.append(a)          # one element at the end
+    xs.extend(other)      # every element of another iterable
+    xs.insert(0, a)       # at a position
+    xs += [a, b]          # same as extend
+    xs = xs + [a]         # new list
+
+    append adds ONE object; extend unpacks. Both return None.
+
+    failure_attempt_ids is a tuple and has no append. Accumulate in a list,
+    then freeze: RecoveryEpisode(failure_attempt_ids=tuple(failures), ...)
+
+
+================================================================================
+Q10. Does Python have a sorted set?
+================================================================================
+A10. No sorted set in the stdlib. set is a hash set with arbitrary order.
+
+     Sort once at the end        -> sorted(set(xs))
+     Dedup keeping insert order  -> list(dict.fromkeys(xs))
+     Stay sorted across inserts  -> sortedcontainers.SortedSet (third party)
+     Keep a list sorted          -> bisect.insort(xs, item)
+
+     For failure_attempt_ids the order is chronological, not by ID value, so
+     sorting the IDs would be wrong. Dedup preserving append order:
+        seen = set(); failures = []
+        for a in attempts_sorted_by_time:
+            if a.attempt_id not in seen:
+                seen.add(a.attempt_id); failures.append(a.attempt_id)
+
+
+================================================================================
+Q11. x = [7, 5, 1, 4, 8, 3] -- sort while I insert
+================================================================================
+A11. import bisect
+     x = []
+     for n in [7, 5, 1, 4, 8, 3]:
+         bisect.insort(x, n)
+     # 7 -> [7] -> [5,7] -> [1,5,7] -> [1,4,5,7] -> [1,4,5,7,8] -> [1,3,4,5,7,8]
+
+     insort_left / insort_right control the side for equal values.
+     key= supported since Python 3.10.
+     Repeated insort costs O(n^2) in shifting; sorted() once is O(n log n).
+
+
+================================================================================
+Q12. And if x = [Child(age=7), ...]? Sorted by age.
+================================================================================
+A12. Sort all at once:
+         x.sort(key=lambda c: c.age)
+         from operator import attrgetter
+         x.sort(key=attrgetter("age"))
+         x.sort(key=attrgetter("age", "name"))     # tie-break
+         x.sort(key=attrgetter("age"), reverse=True)
+
+     Insert one at a time (Python 3.10+):
+         bisect.insort(x, Child(age=6), key=lambda c: c.age)
+
+     Make the class sort itself:
+         @dataclass(order=True)
+         class Child:
+             age: int      # field order defines comparison order
+             name: str
+     Then sorted(x) and bisect.insort(x, c) need no key.
+
+
+================================================================================
+Q13. How do I pretty print {'1': [Attempt(...), ...], ...}?
+================================================================================
+A13. Stdlib:
+         from pprint import pp
+         pp(by_subscription, width=100)
+     pp is pprint with sort_dicts=False. Python 3.10+ breaks dataclass reprs
+     across lines, one field per line.
+
+     One line per attempt:
+         for sub, items in by_subscription.items():
+             print(f"{sub}:")
+             for a in items:
+                 print(f"  {a.occurred_at:>9} {a.result.value:<7} id={a.attempt_id}")
+
+     Days instead of seconds:
+         print(f"  day {a.occurred_at / 86400:>5.1f} ...")
+
+     Data note: occurred_at=43200.0 and 129600.0 are floats while the field is
+     annotated int. Dataclasses do not enforce annotations.
+
+
+================================================================================
+Q14. Syntax to iterate a dict: print(k, v) for (k, v) in dict
+================================================================================
+A14. for k, v in d.items():     # keys and values
+     for k in d:                # keys, the default
+     for v in d.values():       # values only
+
+     Two fixes:
+       - .items() is required. Iterating a dict yields keys, so
+         for (k, v) in d tries to unpack each key -> ValueError.
+       - print(...) for ... is not a statement. Use a plain for loop.
+
+     Companions:
+       sorted(d.items()), enumerate(d.items()),
+       list(d.items()) when adding or deleting keys during iteration.
+
+
+================================================================================
+Q15. Is this valid?
+     print(subscription_id, attempt.occurred_at, attempt.status)
+       for subscription_id, a in sorted_attempts_by_subscription_id.items()
+================================================================================
+A15. No. SyntaxError: invalid syntax. Three problems:
+       - Syntax: use a for statement, not a bare comprehension.
+       - Wrong variable: binds a, references attempt -> NameError.
+       - Wrong attribute: Attempt has result, not status. status belongs to
+         RecoveryEpisode -> AttributeError.
+
+     The dict value is a LIST, so a second loop is needed:
+         for subscription_id, attempts in sorted_attempts_by_subscription_id.items():
+             for a in attempts:
+                 print(subscription_id, a.occurred_at, a.result)
+
+
+================================================================================
+Q16. In a list, how do I pop the first element?
+================================================================================
+A16. first = xs.pop(0)     # removes and returns; IndexError if empty
+     first = xs[0]         # read without removing
+     head, *rest = xs      # first plus a new list with the remainder
+
+     xs.pop() with no argument takes the LAST element.
+     xs.pop(0) is O(n) because everything shifts left.
+
+     Queue-style:
+         from collections import deque
+         queue = deque(attempts)
+         a = queue.popleft()      # O(1)
+
+
+================================================================================
+Q17. Sintaxe do/while em Python
+================================================================================
+A17. Python nao tem do/while. O idioma equivalente:
+         while True:
+             corpo()
+             if not condicao:
+                 break
+
+     do { x(); } while (c);  ->  while True: x(); if not c: break
+     while (c) { x(); }      ->  while c: x()
+
+     Variacoes: for linha in iter(input, "sair"), while fila:,
+     while ... else (else roda quando termina sem break).
+
+
+================================================================================
+Q18. How to push an element to a tuple?
+================================================================================
+A18. Tuples are immutable; you build a new one:
+         t = t + (x,)
+         t += (x,)
+         t = (*t, x)
+         t = (x, *t)
+
+     The trailing comma makes it a tuple: (x) is just x, so t + ('1') raises
+     TypeError: can only concatenate tuple.
+     Each += copies the whole tuple: O(n^2) in a loop.
+
+     Pattern: accumulate in a list, freeze once with tuple(failures).
+     RecoveryEpisode is frozen=True, and a frozen dataclass is only truly
+     immutable (and hashable) when its fields are immutable too.
+
+
+================================================================================
+Q19. Does Python have a ternary ? :
+================================================================================
+A19. Yes, value first, condition in the middle:
+         status = EpisodeStatus.RECOVERED if recovered else EpisodeStatus.EXPIRED
+
+     c ? a : b   ->  a if c else b
+     x ?? y      ->  x if x is not None else y
+     x || y      ->  x or y
+
+     else is MANDATORY (this was the comprehension error in Q5).
+     It is an expression, so it works in arguments, f-strings, comprehensions.
+     "or" as a default fires on any falsy value: count or 10 returns 10 when
+     count is 0.
+
+
+================================================================================
+Q20. dataclasses.FrozenInstanceError: cannot assign to field
+     'failure_attempt_ids'
+================================================================================
+A20. frozen=True blocks every assignment after construction.
+
+     Option 1, build a new instance:
+         from dataclasses import replace
+         episode = replace(episode,
+             failure_attempt_ids=episode.failure_attempt_ids + (a.attempt_id,))
+
+     Option 2, accumulate first and construct once (better fit):
+         failures = []; recovery_id = None
+         for a in attempts:
+             if a.result is AttemptResult.FAILURE:
+                 failures.append(a.attempt_id)
+             else:
+                 recovery_id = a.attempt_id
+                 break
+         episode = RecoveryEpisode(..., failure_attempt_ids=tuple(failures),
+                                   recovery_attempt_id=recovery_id)
+
+
+================================================================================
+Q21. Can a frozen dataclass field be assigned after instantiation?
+================================================================================
+A21. No. frozen=True generates a __setattr__ that raises FrozenInstanceError
+     for EVERY field; the annotated type makes no difference.
+
+     What frozen covers:
+       - Rebinding the attribute is blocked.
+       - Mutating the value in place is not. A tuple has no mutating methods,
+         so the field is genuinely immutable; a list field would still be
+         appendable.
+
+     Escape hatch, legitimate only inside __post_init__:
+         object.__setattr__(self, "deadline", self.started_at + WINDOW)
+     Outside __post_init__ it defeats the guarantee and breaks hashing if the
+     object is already a dict key or in a set.
+
+
+================================================================================
+Q22. How do I start a dict { a: 1, b: 2 }?
+================================================================================
+A22. In Python the keys inside {} are EXPRESSIONS, so bare a means the
+     variable a. For string keys, quote them:
+         d = {"a": 1, "b": 2}
+         d = dict(a=1, b=2)
+
+     JS { a: 1 }      -> Python {"a": 1}
+     JS { [k]: 1 }    -> Python {k: 1}
+     JS { ...x, b: 2} -> Python {**x, "b": 2}
+
+     Keying by variable value:
+         a = "sub-1"; d = {a: 1}    # -> {"sub-1": 1}
+         counts = {sub: len(items) for sub, items in by_subscription.items()}
+
+
+================================================================================
+Q23. Can I build a dataclass object from a dict?
+================================================================================
+A23. Yes, with unpacking:
+         a = Attempt(**d)
+     Keys must match field names exactly. Extra keys -> TypeError, missing -> TypeError.
+
+     Ignoring extra keys:
+         from dataclasses import fields
+         names = {f.name for f in fields(Attempt)}
+         a = Attempt(**{k: v for k, v in d.items() if k in names})
+
+     Reverse: asdict(a), astuple(a)
+
+     Caveats:
+       - No type coercion or validation. Attempt(**{"occurred_at": "0"}) stores
+         the string. Use pydantic or attrs for checked values.
+       - Nesting is one-way: asdict recurses, Attempt(**d) does not rebuild
+         nested dataclasses. result must already be an AttemptResult, not
+         the string "failure".
+
+
+================================================================================
+Q24. [1, 2, 3] to [4, 8, 12]
+================================================================================
+A24. ys = [x * 4 for x in xs]
+     list(map(lambda x: x * 4, xs))      # same result
+     xs[:] = [x * 4 for x in xs]         # in place
+     (x * 4 for x in xs)                 # lazy generator
+     [x * 4 for x in xs if x > 1]        # with a filter -> [8, 12]
+
+     Applied: days = [a.occurred_at / 86400 for a in attempts]
+
+
+================================================================================
+Q25. Example of bisect.insort(
+================================================================================
+A25. import bisect
+
+     # 1. plain numbers
+     x = []
+     for n in [7, 5, 1, 4, 8, 3]:
+         bisect.insort(x, n)              # -> [1, 3, 4, 5, 7, 8]
+
+     # 2. objects by a field (key= needs Python 3.10+)
+     bisect.insort(attempts, a, key=lambda at: at.occurred_at)
+
+     # 3. tuples compare left to right, no key needed
+     ts = []
+     for t in [('2', 43200), ('1', 172800), ('1', 0)]:
+         bisect.insort(ts, t)
+     # -> [('1', 0), ('1', 172800), ('2', 43200)]
+
+     # 4. position without inserting
+     bisect.bisect_left(x, 6)             # -> 4
+
+     The list must ALREADY be sorted by the same criterion.
+     insort mutates in place and returns None.
+     Case 3 gives (subscription_id, occurred_at) ordering for free, which is
+     what build_recovery_episodes needs to return.
+
+
+================================================================================
+Q26. How do I rebase all my commits to set the author and email?
+================================================================================
+A26. Repo state found: 9 commits, all authored AND committed by
+     Host Identity <leak@host.dev>, no remotes, clean tree,
+     git-filter-repo installed at /opt/homebrew/bin/git-filter-repo.
+
+     Step 1 of 4, set the identity Git uses from now on:
+         git config --global user.name "Your Name"
+         git config --global user.email "you@example.com"
+     (--local instead of --global to scope it to this repo only)
+
+     Step 2 of 4, back up before rewriting:
+         cd /Users/fabio/code && tar czf recovery-episodes-backup.tgz recovery-episodes
+     History rewriting replaces every commit hash and filter-repo drops the
+     original refs, so this tarball is the undo button.
+
+     Step 3 of 4, rewrite every commit:
+         cd /Users/fabio/code/recovery-episodes
+         git filter-repo --force \
+           --name-callback 'return b"Your Name"' \
+           --email-callback 'return b"you@example.com"'
+     Rewrites author and committer on all 9 commits. --force is needed because
+     filter-repo normally refuses to run on a repo that is not a fresh clone.
+     Uncommitted tracked changes abort the run; untracked files are fine.
+
+     Conditional form, rewriting only the old identity:
+         git filter-repo --force --email-callback '
+           return b"you@example.com" if email == b"leak@host.dev" else email
+         '
+
+     Step 4 of 4 (not yet run): verify with
+         git log --format='%h %an <%ae> | %cn <%ce>'
+
+
+================================================================================
+Q27. Meu nome tem acento
+================================================================================
+A27. b"Fabio" com acento e SyntaxError:
+     "bytes can only contain ASCII literal characters".
+
+     Use .encode():
+         git filter-repo --force \
+           --name-callback 'return "Seu Nome".encode("utf-8")' \
+           --email-callback 'return b"voce@exemplo.com"'
+
+     O nome vira bytes UTF-8 em tempo de execucao, que e como o Git guarda o
+     campo author. O email continua ASCII, entao b"..." serve.
+     Se o terminal mostrar errado: git config --global i18n.logOutputEncoding utf-8
+
+
+================================================================================
+Q28. Generate the log of messages of the questions and responses during this
+     chat and save them to claude.log
+================================================================================
+A28. This file.
+
+
+================================================================================
+OPEN ITEMS
+================================================================================
+  - build_recovery_episodes at interview.py still raises NotImplementedError.
+  - git stash@{0} "wip: interview.py experiments" holds the "=" version of
+    the dataclasses; pop or drop it.
+  - The author rewrite (step 3) has not been verified here; run step 4 to confirm.
+  - interview-notes.txt and this claude.log are untracked.
